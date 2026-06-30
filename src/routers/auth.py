@@ -1,10 +1,10 @@
 """
 routers/auth.py — Routes d'authentification
 
-  POST /auth/connexion          : se connecter et obtenir un token JWT
-  POST /auth/creer-utilisateur  : créer le tout premier compte (sans token)
-  POST /auth/ajouter-utilisateur: ajouter un compte (directeur requis)
-  GET  /auth/moi                : voir son propre profil
+  POST /auth/connexion          → se connecter (tous)
+  POST /auth/creer-premier-compte → créer le compte PDG initial (sans token)
+  POST /auth/ajouter-vendeur    → directeur crée un vendeur pour sa boutique
+  GET  /auth/moi                → voir son propre profil
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from ..dependencies import get_db, get_utilisateur_connecte, exiger_directeur
 from .. import crud, schemas
 from ..auth import creer_token
-
 
 router = APIRouter(prefix="/auth", tags=["Authentification"])
 
@@ -29,104 +28,105 @@ router = APIRouter(prefix="/auth", tags=["Authentification"])
 )
 def connexion(demande: schemas.DemandeConnexion, db: Session = Depends(get_db)):
     """
-    Envoie le nom d'utilisateur et le mot de passe.
-    En retour : un token JWT à utiliser dans toutes les requêtes suivantes.
-
-    Comment utiliser le token :
-        En-tête HTTP → Authorization: Bearer <token>
+    Retourne un token JWT à utiliser dans toutes les requêtes protégées.
+    En-tête à envoyer :  Authorization: Bearer <token>
     """
     utilisateur = crud.verifier_connexion(db, demande.nom_utilisateur, demande.mot_de_passe)
-
     if utilisateur is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Nom d'utilisateur ou mot de passe incorrect.",
         )
-
     token = creer_token(
         nom_utilisateur=utilisateur.nom_utilisateur,
         role=utilisateur.role,
     )
-
     return {"access_token": token, "type_token": "bearer"}
 
 
 # ------------------------------------------------------------------
-# Premier utilisateur — sans token (bootstrapping)
-# Accessible UNIQUEMENT si aucun compte n'existe encore
+# Premier compte PDG — sans token, bloqué dès qu'un compte existe
 # ------------------------------------------------------------------
 
 @router.post(
     "/creer-premier-compte",
     response_model=schemas.ReponseUtilisateur,
     status_code=status.HTTP_201_CREATED,
-    summary="Créer le tout premier compte directeur (aucun token requis)",
+    summary="Créer le compte PDG initial (aucun token requis)",
 )
 def creer_premier_compte(
-    demande: schemas.DemandeCreationUtilisateur,
-    db: Session = Depends(get_db),
+    demande : schemas.DemandeCreationUtilisateur,
+    db      : Session = Depends(get_db),
 ):
     """
-    Endpoint de démarrage : crée le premier compte directeur.
-    Bloqué automatiquement dès qu'au moins un utilisateur existe.
+    À utiliser une seule fois au démarrage pour créer le compte PDG.
+    Automatiquement bloqué dès qu'un utilisateur existe.
     """
-    # Bloquer si des utilisateurs existent déjà
     if crud.get_nombre_utilisateurs(db) > 0:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Un compte existe déjà. Utilisez /auth/ajouter-utilisateur (token directeur requis).",
+            detail="Un compte existe déjà. Connectez-vous en tant que PDG.",
         )
 
-    # Vérifier que le nom n'est pas déjà pris
-    if crud.get_utilisateur_par_nom(db, demande.nom_utilisateur):
+    if demande.role != "pdg":
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Le nom '{demande.nom_utilisateur}' est déjà utilisé.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le premier compte doit obligatoirement être un PDG.",
         )
+
+    if crud.get_utilisateur_par_nom(db, demande.nom_utilisateur):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Ce nom est déjà utilisé.")
 
     return crud.creer_utilisateur(
         db=db,
         nom_utilisateur=demande.nom_utilisateur,
         mot_de_passe=demande.mot_de_passe,
-        role=demande.role,
+        role="pdg",
+        boutique_id=None,  # le PDG n'appartient à aucune boutique
     )
 
 
 # ------------------------------------------------------------------
-# Ajouter un utilisateur — réservé au directeur
+# Le directeur ajoute un vendeur à sa propre boutique
 # ------------------------------------------------------------------
 
 @router.post(
-    "/ajouter-utilisateur",
+    "/ajouter-vendeur",
     response_model=schemas.ReponseUtilisateur,
     status_code=status.HTTP_201_CREATED,
-    summary="Ajouter un vendeur ou directeur (token directeur requis)",
+    summary="Ajouter un vendeur à sa boutique (directeur requis)",
 )
-def ajouter_utilisateur(
-    demande: schemas.DemandeCreationUtilisateur,
-    db: Session = Depends(get_db),
-    _directeur=Depends(exiger_directeur),   # seul le directeur peut créer des comptes
+def ajouter_vendeur(
+    demande   : schemas.DemandeAjouterVendeur,
+    db        : Session = Depends(get_db),
+    directeur = Depends(exiger_directeur),
 ):
     """
-    Crée un nouveau compte vendeur ou directeur.
-    Seul un directeur connecté peut utiliser cet endpoint.
+    Le directeur crée un vendeur qui sera automatiquement
+    assigné à la même boutique que le directeur.
     """
-    if crud.get_utilisateur_par_nom(db, demande.nom_utilisateur):
+    if directeur.boutique_id is None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Le nom '{demande.nom_utilisateur}' est déjà utilisé.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ce compte n'est pas associé à une boutique.",
         )
+
+    if crud.get_utilisateur_par_nom(db, demande.nom_utilisateur):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Ce nom d'utilisateur est déjà pris.")
 
     return crud.creer_utilisateur(
         db=db,
         nom_utilisateur=demande.nom_utilisateur,
         mot_de_passe=demande.mot_de_passe,
-        role=demande.role,
+        role="vendeur",
+        boutique_id=directeur.boutique_id,  # même boutique que le directeur
     )
 
 
 # ------------------------------------------------------------------
-# Profil de l'utilisateur connecté
+# Profil
 # ------------------------------------------------------------------
 
 @router.get(
@@ -135,5 +135,4 @@ def ajouter_utilisateur(
     summary="Voir son propre profil",
 )
 def mon_profil(utilisateur=Depends(get_utilisateur_connecte)):
-    """Retourne les informations du compte actuellement connecté."""
     return utilisateur
