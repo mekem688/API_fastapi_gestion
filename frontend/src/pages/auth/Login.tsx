@@ -10,8 +10,8 @@ import { useState } from 'react'
 import type { User } from '../../types'
 
 const schema = z.object({
-  email:        z.string().email('Email invalide'),
-  mot_de_passe: z.string().min(1, 'Mot de passe requis'),
+  nom_utilisateur: z.string().min(3, "Nom d'utilisateur requis (3 caractères min.)"),
+  mot_de_passe:    z.string().min(1, 'Mot de passe requis'),
 })
 type Form = z.infer<typeof schema>
 
@@ -27,7 +27,7 @@ export default function Login() {
   async function onSubmit(data: Form) {
     setErreur('')
     try {
-      const res = await login(data.email, data.mot_de_passe)
+      const res = await login(data.nom_utilisateur, data.mot_de_passe)
       const user: User = {
         id:          res.id,
         nom:         res.nom,
@@ -37,12 +37,12 @@ export default function Login() {
         boutique_id: res.boutique_id,
       }
       loginStore(res.access_token, user)
-      if (res.role === 'pdg')       navigate('/pdg/dashboard')
+      if (res.role === 'pdg')            navigate('/pdg/dashboard')
       else if (res.role === 'directeur') navigate('/directeur/dashboard')
-      else navigate('/vendeur/dashboard')
+      else                               navigate('/vendeur/dashboard')
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setErreur(msg ?? 'Identifiants incorrects. Vérifiez votre email et mot de passe.')
+      setErreur(msg ?? 'Identifiants incorrects. Vérifiez votre nom d\'utilisateur et mot de passe.')
     }
   }
 
@@ -54,18 +54,17 @@ export default function Login() {
             <span className="text-xl font-bold text-white">M</span>
           </div>
           <h1 className="text-2xl font-bold text-gray-900">MSTECH Gestion</h1>
-          <p className="mt-1 text-sm text-gray-500">Connectez-vous à votre compte</p>
+          <p className="mt-1 text-sm text-gray-500">Connectez-vous à votre espace</p>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <Input
-              label="Email"
-              type="email"
-              placeholder="nom@exemple.com"
-              autoComplete="email"
-              error={errors.email?.message}
-              {...register('email')}
+              label="Nom d'utilisateur"
+              placeholder="ex : jean.dupont"
+              autoComplete="username"
+              error={errors.nom_utilisateur?.message}
+              {...register('nom_utilisateur')}
             />
             <Input
               label="Mot de passe"
