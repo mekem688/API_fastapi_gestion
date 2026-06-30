@@ -1,6 +1,37 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Any
+from typing import Any, Generic, TypeVar
+import math
+
+# Type générique pour la pagination
+T = TypeVar("T")
+
+
+# ============================================================
+# PAGINATION
+# ============================================================
+
+class ReponsePaginee(BaseModel, Generic[T]):
+    """
+    Enveloppe standard pour toutes les listes paginées.
+
+    Exemple de réponse JSON :
+      {
+        "total"    : 87,     ← nombre total d'enregistrements (toutes pages confondues)
+        "page"     : 2,      ← page actuelle (commence à 1)
+        "taille"   : 20,     ← nombre d'éléments demandés par page
+        "nb_pages" : 5,      ← nombre total de pages
+        "resultats": [...]   ← éléments de la page courante
+      }
+
+    Paramètres URL à utiliser dans vos requêtes :
+      ?page=1&taille=20
+    """
+    total    : int      # nombre total d'enregistrements (sans pagination)
+    page     : int      # page courante (1-indexée)
+    taille   : int      # taille de page demandée
+    nb_pages : int      # ceil(total / taille)
+    resultats: list[T]  # éléments de la page courante
 
 
 # ============================================================
