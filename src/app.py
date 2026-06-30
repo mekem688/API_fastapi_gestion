@@ -4,24 +4,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from .data import Base, engine
 from .routers import items
 from .routers import auth as auth_router
+from .routers import pdg as pdg_router
 
-# Création automatique des tables si elles n'existent pas
+# Création automatique des tables si elles n'existent pas encore
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title       = "API Gestion de Stock",
+    title       = "API Gestion de Stock Multi-Boutiques",
     description = (
-        "API REST de gestion de stock avec authentification JWT.\n\n"
-        "**Rôles :**\n"
-        "- `vendeur` — ventes, consultation articles et mouvements\n"
-        "- `directeur` — tout + achats, profits, alertes, création d'articles\n\n"
-        "**Connexion :** `POST /auth/connexion` → copier le token → cliquer 'Authorize' en haut"
+        "API REST avec authentification JWT et gestion multi-boutiques.\n\n"
+        "**Hiérarchie des rôles :**\n"
+        "- `pdg` — crée les boutiques, assigne les directeurs, voit tout\n"
+        "- `directeur` — gère SA boutique (articles, achats, profits, alertes)\n"
+        "- `vendeur` — fait des ventes dans SA boutique\n\n"
+        "**Démarrage rapide :**\n"
+        "1. `POST /auth/creer-premier-compte` → créer le PDG\n"
+        "2. `POST /auth/connexion` → obtenir le token\n"
+        "3. Cliquer sur **Authorize** ici → coller le token\n"
+        "4. `POST /pdg/boutiques` → créer une boutique\n"
+        "5. `POST /pdg/boutiques/{id}/ajouter-directeur` → assigner un directeur"
     ),
-    version     = "2.0.0",
+    version     = "3.0.0",
 )
 
-# Autoriser les requêtes depuis n'importe quelle origine
-# (à restreindre en production : allow_origins=["https://monsite.com"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins  = ["*"],
@@ -31,13 +36,15 @@ app.add_middleware(
 
 # Enregistrement des routes
 app.include_router(auth_router.router)   # /auth/*
+app.include_router(pdg_router.router)    # /pdg/*
 app.include_router(items.router)         # /articles/*
 
 
 @app.get("/", tags=["Root"])
 def accueil():
     return {
-        "message"      : "API Gestion de Stock — OK",
-        "documentation": "/docs",
-        "connexion"    : "POST /auth/connexion",
+        "message"       : "API Gestion de Stock Multi-Boutiques",
+        "version"       : "3.0.0",
+        "documentation" : "/docs",
+        "premier_pas"   : "POST /auth/creer-premier-compte",
     }
