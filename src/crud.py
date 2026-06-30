@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 from .models import Article, StockMovement, Utilisateur, Boutique
 from .auth import hacher_mot_de_passe, verifier_mot_de_passe
+from .permissions import TOUTES_LES_PERMISSIONS
 
 
 # ============================================================
@@ -14,6 +15,10 @@ def get_utilisateur_par_nom(db: Session, nom_utilisateur: str):
     return db.query(Utilisateur).filter(
         Utilisateur.nom_utilisateur == nom_utilisateur
     ).first()
+
+
+def get_utilisateur_par_id(db: Session, utilisateur_id: int):
+    return db.query(Utilisateur).filter(Utilisateur.id == utilisateur_id).first()
 
 
 def get_nombre_utilisateurs(db: Session) -> int:
@@ -28,15 +33,23 @@ def creer_utilisateur(
     boutique_id: int | None = None,
 ):
     """
-    Crée un utilisateur. Le mot de passe est haché avant stockage.
-    boutique_id est None pour le PDG, requis pour directeur et vendeur.
+    Crée un utilisateur.
+    - Le mot de passe est haché (jamais en clair).
+    - Les directeurs démarrent sans aucune permission (le PDG les accordera).
+    - Le PDG n'a pas de boutique_id.
     """
     hash_securise = hacher_mot_de_passe(mot_de_passe)
-    utilisateur   = Utilisateur(
+
+    # Les directeurs commencent avec aucune permission accordée
+    permissions_initiales = [] if role == "directeur" else None
+
+    utilisateur = Utilisateur(
         nom_utilisateur   = nom_utilisateur,
         mot_de_passe_hash = hash_securise,
         role              = role,
         boutique_id       = boutique_id,
+        est_actif         = True,
+        permissions       = permissions_initiales,
     )
     db.add(utilisateur)
     db.commit()
@@ -45,20 +58,76 @@ def creer_utilisateur(
 
 
 def verifier_connexion(db: Session, nom_utilisateur: str, mot_de_passe: str):
+    """
+    Vérifie les identifiants.
+    Retourne None si introuvable, mauvais mot de passe, ou compte suspendu.
+    """
     utilisateur = get_utilisateur_par_nom(db, nom_utilisateur)
     if utilisateur is None:
         return None
     if not verifier_mot_de_passe(mot_de_passe, utilisateur.mot_de_passe_hash):
         return None
+    # Bloquer la connexion si le compte est suspendu
+    if not utilisateur.est_actif:
+        return "suspendu"   # signal spécial pour afficher le bon message
     return utilisateur
 
 
 def get_vendeurs_de_boutique(db: Session, boutique_id: int) -> int:
-    """Retourne le nombre de vendeurs d'une boutique."""
     return db.query(Utilisateur).filter(
         Utilisateur.boutique_id == boutique_id,
         Utilisateur.role        == "vendeur",
     ).count()
+
+
+def get_directeur_de_boutique(db: Session, boutique_id: int):
+    """Retourne le directeur d'une boutique (ou None s'il n'y en a pas encore)."""
+    return db.query(Utilisateur).filter(
+        Utilisateur.boutique_id == boutique_id,
+        Utilisateur.role        == "directeur",
+    ).first()
+
+
+# ============================================================
+# GESTION DES PERMISSIONS (PDG → Directeur)
+# ============================================================
+
+def modifier_permissions(db: Session, directeur_id: int, nouvelles_permissions: list[str]):
+    """
+    Remplace la liste de permissions d'un directeur.
+    Filtre les valeurs invalides pour éviter les erreurs.
+    """
+    directeur = get_utilisateur_par_id(db, directeur_id)
+    if not directeur or directeur.role != "directeur":
+        return None
+
+    # On ne garde que les permissions valides connues
+    permissions_valides = [p for p in nouvelles_permissions if p in TOUTES_LES_PERMISSIONS]
+    directeur.permissions = permissions_valides
+
+    db.commit()
+    db.refresh(directeur)
+    return directeur
+
+
+def suspendre_utilisateur(db: Session, utilisateur_id: int):
+    """Désactive un compte — l'utilisateur ne peut plus se connecter."""
+    utilisateur = get_utilisateur_par_id(db, utilisateur_id)
+    if utilisateur:
+        utilisateur.est_actif = False
+        db.commit()
+        db.refresh(utilisateur)
+    return utilisateur
+
+
+def reactiver_utilisateur(db: Session, utilisateur_id: int):
+    """Réactive un compte suspendu."""
+    utilisateur = get_utilisateur_par_id(db, utilisateur_id)
+    if utilisateur:
+        utilisateur.est_actif = True
+        db.commit()
+        db.refresh(utilisateur)
+    return utilisateur
 
 
 # ============================================================
@@ -74,7 +143,6 @@ def creer_boutique(db: Session, nom: str, ville: str, adresse: str | None):
 
 
 def get_boutiques(db: Session):
-    """Retourne toutes les boutiques (actives et archivées)."""
     return db.query(Boutique).order_by(Boutique.date_creation.desc()).all()
 
 
@@ -83,7 +151,6 @@ def get_boutique(db: Session, boutique_id: int):
 
 
 def archiver_boutique(db: Session, boutique_id: int):
-    """Archive une boutique (soft delete — les données restent intactes)."""
     boutique = get_boutique(db, boutique_id)
     if boutique:
         boutique.est_active = False
@@ -97,7 +164,6 @@ def archiver_boutique(db: Session, boutique_id: int):
 # ============================================================
 
 def create_article(db: Session, article, boutique_id: int):
-    """Crée un article dans la boutique du directeur connecté."""
     nouvel_article = Article(
         **article.model_dump(),
         boutique_id = boutique_id,
@@ -110,7 +176,6 @@ def create_article(db: Session, article, boutique_id: int):
 
 
 def get_articles(db: Session, boutique_id: int, skip: int = 0, limit: int = 50):
-    """Retourne uniquement les articles de la boutique de l'utilisateur."""
     return (
         db.query(Article)
         .filter(Article.boutique_id == boutique_id)
@@ -121,7 +186,6 @@ def get_articles(db: Session, boutique_id: int, skip: int = 0, limit: int = 50):
 
 
 def get_article(db: Session, article_id: int, boutique_id: int):
-    """Retourne un article seulement s'il appartient à la boutique de l'utilisateur."""
     return db.query(Article).filter(
         Article.id          == article_id,
         Article.boutique_id == boutique_id,
@@ -190,7 +254,7 @@ def get_movements_by_date(
 
 
 # ============================================================
-# LOGIQUE DE STOCK
+# STOCK
 # ============================================================
 
 def add_stock(db: Session, article_id: int, quantite: int, boutique_id: int):
@@ -211,8 +275,8 @@ def remove_stock(db: Session, article_id: int, quantite: int, boutique_id: int):
     if article.quantity < quantite:
         raise ValueError("Stock insuffisant")
     article.quantity -= quantite
-    prix_de_vente_actuel = article.price_vente
-    enregistrer_mouvement(db, boutique_id, article_id, "OUT", quantite, prix_de_vente_actuel)
+    prix_de_vente = article.price_vente
+    enregistrer_mouvement(db, boutique_id, article_id, "OUT", quantite, prix_de_vente)
     db.commit()
     db.refresh(article)
     benefice = (article.price_vente - article.price_achat) * quantite
@@ -220,7 +284,7 @@ def remove_stock(db: Session, article_id: int, quantite: int, boutique_id: int):
 
 
 # ============================================================
-# PROFITS — par boutique
+# PROFITS
 # ============================================================
 
 def get_article_profit(db: Session, article_id: int, boutique_id: int):
@@ -232,14 +296,14 @@ def get_article_profit(db: Session, article_id: int, boutique_id: int):
         StockMovement.boutique_id   == boutique_id,
         StockMovement.movement_type == "OUT",
     ).all()
-    benefice_total = 0.0
-    for vente in ventes:
-        benefice_total += (vente.unit_price - article.price_achat) * vente.quantity
+    benefice_total = sum(
+        (vente.unit_price - article.price_achat) * vente.quantity
+        for vente in ventes
+    )
     return {"article_id": article_id, "benefice_total": round(benefice_total, 2)}
 
 
 def get_total_profit_boutique(db: Session, boutique_id: int) -> float:
-    """Bénéfice total d'une seule boutique (une requête SQL)."""
     resultat = (
         db.query(
             func.sum(
@@ -257,7 +321,6 @@ def get_total_profit_boutique(db: Session, boutique_id: int) -> float:
 
 
 def get_ventes_du_mois_boutique(db: Session, boutique_id: int) -> int:
-    """Nombre de mouvements OUT dans les 30 derniers jours pour une boutique."""
     il_y_a_30_jours = datetime.now(timezone.utc) - timedelta(days=30)
     return (
         db.query(StockMovement)
@@ -271,7 +334,6 @@ def get_ventes_du_mois_boutique(db: Session, boutique_id: int) -> int:
 
 
 def get_articles_en_alerte_boutique(db: Session, boutique_id: int) -> list:
-    """Articles dont le stock est sous le seuil d'alerte dans une boutique."""
     return db.query(Article).filter(
         Article.boutique_id == boutique_id,
         Article.quantity    <= Article.low_stock_threshold,
@@ -279,11 +341,10 @@ def get_articles_en_alerte_boutique(db: Session, boutique_id: int) -> list:
 
 
 # ============================================================
-# DASHBOARD PDG — toutes boutiques
+# AGRÉGATS PDG — toutes boutiques
 # ============================================================
 
 def get_benefice_total_entreprise(db: Session) -> float:
-    """Bénéfice total de TOUTES les boutiques en une requête."""
     resultat = (
         db.query(
             func.sum(
@@ -298,7 +359,6 @@ def get_benefice_total_entreprise(db: Session) -> float:
 
 
 def get_ventes_totales_du_mois(db: Session) -> int:
-    """Nombre total de ventes de toutes les boutiques sur 30 jours."""
     il_y_a_30_jours = datetime.now(timezone.utc) - timedelta(days=30)
     return (
         db.query(StockMovement)
@@ -311,7 +371,6 @@ def get_ventes_totales_du_mois(db: Session) -> int:
 
 
 def get_nb_articles_en_alerte_total(db: Session) -> int:
-    """Nombre total d'articles en alerte dans toute l'entreprise."""
     return (
         db.query(Article)
         .filter(Article.quantity <= Article.low_stock_threshold)
@@ -320,10 +379,6 @@ def get_nb_articles_en_alerte_total(db: Session) -> int:
 
 
 def get_activite_recente(db: Session, limite: int = 10):
-    """
-    Retourne les derniers mouvements de stock de toutes les boutiques,
-    avec le nom de la boutique et de l'article.
-    """
     mouvements = (
         db.query(StockMovement, Article, Boutique)
         .join(Article,  Article.id  == StockMovement.article_id)
@@ -345,13 +400,7 @@ def get_activite_recente(db: Session, limite: int = 10):
 
 
 def get_evolution_ventes(db: Session, nb_jours: int = 30):
-    """
-    Retourne les ventes jour par jour sur les nb_jours derniers jours,
-    pour toutes les boutiques.
-    Format : [{"date": "2024-06-01", "nb_ventes": 5, "benefice_jour": 12500.0}, ...]
-    """
     date_debut = datetime.now(timezone.utc) - timedelta(days=nb_jours)
-
     mouvements = (
         db.query(StockMovement, Article)
         .join(Article, Article.id == StockMovement.article_id)
@@ -361,22 +410,15 @@ def get_evolution_ventes(db: Session, nb_jours: int = 30):
         )
         .all()
     )
-
-    # Regrouper par date
     par_jour: dict[str, dict] = {}
     for mouvement, article in mouvements:
-        cle_date  = mouvement.created_at.strftime("%Y-%m-%d")
-        benefice  = (mouvement.unit_price - article.price_achat) * mouvement.quantity
-
+        cle_date = mouvement.created_at.strftime("%Y-%m-%d")
+        benefice = (mouvement.unit_price - article.price_achat) * mouvement.quantity
         if cle_date not in par_jour:
             par_jour[cle_date] = {"date": cle_date, "nb_ventes": 0, "benefice_jour": 0.0}
-
         par_jour[cle_date]["nb_ventes"]     += mouvement.quantity
         par_jour[cle_date]["benefice_jour"] += benefice
-
-    # Trier par date croissante et arrondir les bénéfices
     resultat = sorted(par_jour.values(), key=lambda x: x["date"])
     for point in resultat:
         point["benefice_jour"] = round(point["benefice_jour"], 2)
-
     return resultat
