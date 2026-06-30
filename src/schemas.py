@@ -12,11 +12,6 @@ class DemandeConnexion(BaseModel):
 
 
 class DemandeCreationUtilisateur(BaseModel):
-    """
-    Schéma de base pour créer un utilisateur.
-    Le rôle est libre ici — les routes elles-mêmes limitent
-    ce qui est autorisé (ex: creer-premier-compte → pdg seulement).
-    """
     nom_utilisateur : str = Field(min_length=3, max_length=50)
     mot_de_passe    : str = Field(min_length=6)
     role            : str = Field(pattern="^(pdg|directeur|vendeur)$")
@@ -32,6 +27,8 @@ class ReponseUtilisateur(BaseModel):
     nom_utilisateur : str
     role            : str
     boutique_id     : int | None = None
+    est_actif       : bool
+    permissions     : list[str] = []
 
     class Config:
         from_attributes = True
@@ -60,15 +57,42 @@ class ReponseBoutique(BaseModel):
 
 
 class DemandeAjouterDirecteur(BaseModel):
-    """Données pour créer le directeur d'une boutique."""
     nom_utilisateur : str = Field(min_length=3, max_length=50)
     mot_de_passe    : str = Field(min_length=6)
 
 
 class DemandeAjouterVendeur(BaseModel):
-    """Données pour créer un vendeur dans une boutique."""
     nom_utilisateur : str = Field(min_length=3, max_length=50)
     mot_de_passe    : str = Field(min_length=6)
+
+
+# ============================================================
+# PERMISSIONS
+# ============================================================
+
+class DemandeModifierPermissions(BaseModel):
+    """
+    Le PDG envoie la liste complète des permissions accordées au directeur.
+    Exemple : ["voir_profits", "faire_achats"]
+    Pour tout bloquer : []
+    Pour tout accorder : ["voir_profits", "faire_achats", "creer_articles", "voir_alertes", "gerer_vendeurs"]
+    """
+    permissions : list[str] = Field(
+        description="Liste des permissions. Valeurs possibles : voir_profits, faire_achats, creer_articles, voir_alertes, gerer_vendeurs"
+    )
+
+
+class ReponsePermissions(BaseModel):
+    """Résumé des droits d'un directeur."""
+    directeur_id    : int
+    nom_utilisateur : str
+    boutique_id     : int | None
+    est_actif       : bool
+    permissions     : list[str]
+    permissions_manquantes : list[str]   # droits qu'il n'a PAS
+
+    class Config:
+        from_attributes = True
 
 
 # ============================================================
@@ -76,25 +100,22 @@ class DemandeAjouterVendeur(BaseModel):
 # ============================================================
 
 class StatsBoutique(BaseModel):
-    """Indicateurs clés d'une seule boutique."""
-    boutique        : ReponseBoutique
-    nb_articles     : int
-    nb_vendeurs     : int
-    benefice_total  : float
-    ventes_du_mois  : int
+    boutique       : ReponseBoutique
+    nb_articles    : int
+    nb_vendeurs    : int
+    benefice_total : float
+    ventes_du_mois : int
 
 
 class MouvementRecent(BaseModel):
-    """Ligne d'activité récente pour le fil d'actualité du PDG."""
     boutique_nom   : str
     article_nom    : str
-    type_mouvement : str     # "IN" ou "OUT"
+    type_mouvement : str
     quantite       : int
     date           : datetime
 
 
 class DashboardPDG(BaseModel):
-    """Vue globale de toute l'entreprise."""
     nb_boutiques              : int
     nb_boutiques_actives      : int
     benefice_total_entreprise : float
@@ -105,8 +126,7 @@ class DashboardPDG(BaseModel):
 
 
 class PointEvolution(BaseModel):
-    """Un point sur la courbe d'évolution des ventes."""
-    date          : str    # format "YYYY-MM-DD"
+    date          : str
     nb_ventes     : int
     benefice_jour : float
 
