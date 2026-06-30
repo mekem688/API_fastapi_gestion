@@ -1,11 +1,16 @@
 """
 routers/items.py — Gestion des articles et du stock
 
-Toutes les données sont automatiquement filtrées
-par la boutique de l'utilisateur connecté (boutique_id).
+Contrôle d'accès par rôle ET par permission :
+  vendeur    → voir articles, vendre (stock/out), voir mouvements
+  directeur  → idem + chaque action supplémentaire requiert la permission PDG
 
-  vendeur    → voir articles, vendre, voir mouvements
-  directeur  → tout + achats, profits, alertes, créer articles
+Permissions vérifiées :
+  creer_articles  → POST /articles/
+  faire_achats    → POST /articles/{id}/stock/in
+  voir_profits    → GET  /articles/profit/*
+  voir_alertes    → GET  /articles/alerts/low-stock
+  gerer_vendeurs  → POST /auth/ajouter-vendeur (dans auth.py)
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,16 +18,14 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
 
 from ..dependencies import get_db, exiger_vendeur, exiger_directeur
+from ..permissions import verifier_permission
 from .. import crud, schemas
 
 router = APIRouter(prefix="/articles", tags=["Articles"])
 
 
 def _boutique_id(utilisateur) -> int:
-    """
-    Retourne le boutique_id de l'utilisateur.
-    Le PDG n'a pas de boutique_id — il passe par les routes /pdg/.
-    """
+    """Le PDG passe par /pdg/ — cette garde empêche les erreurs silencieuses."""
     if utilisateur.boutique_id is None:
         raise HTTPException(
             status_code=403,
@@ -36,12 +39,13 @@ def _boutique_id(utilisateur) -> int:
 # ============================================================
 
 @router.post("/", response_model=schemas.ArticleResponse, status_code=201,
-             summary="Créer un article — directeur")
+             summary="Créer un article — permission creer_articles")
 def create_article(
-    article    : schemas.ArticleCreate,
-    db         : Session = Depends(get_db),
-    directeur  = Depends(exiger_directeur),
+    article   : schemas.ArticleCreate,
+    db        : Session = Depends(get_db),
+    directeur = Depends(exiger_directeur),
 ):
+    verifier_permission(directeur, "creer_articles")
     boutique_id = _boutique_id(directeur)
     return crud.create_article(db, article, boutique_id)
 
@@ -54,6 +58,7 @@ def get_articles(
     db          : Session = Depends(get_db),
     utilisateur = Depends(exiger_vendeur),
 ):
+    # Pas de permission granulaire — tous les rôles peuvent voir les articles
     boutique_id = _boutique_id(utilisateur)
     return crud.get_articles(db, boutique_id, skip=skip, limit=limit)
 
@@ -76,13 +81,14 @@ def get_article(
 # STOCK
 # ============================================================
 
-@router.post("/{id}/stock/in", summary="Entrée de stock (achat) — directeur")
+@router.post("/{id}/stock/in", summary="Entrée de stock (achat) — permission faire_achats")
 def stock_in(
-    id         : int,
-    quantite   : int = Query(gt=0),
-    db         : Session = Depends(get_db),
-    directeur  = Depends(exiger_directeur),
+    id        : int,
+    quantite  : int = Query(gt=0),
+    db        : Session = Depends(get_db),
+    directeur = Depends(exiger_directeur),
 ):
+    verifier_permission(directeur, "faire_achats")
     boutique_id = _boutique_id(directeur)
     article = crud.add_stock(db, id, quantite, boutique_id)
     if not article:
@@ -97,6 +103,7 @@ def stock_out(
     db          : Session = Depends(get_db),
     utilisateur = Depends(exiger_vendeur),
 ):
+    # Les vendeurs peuvent toujours vendre — pas de permission granulaire ici
     boutique_id = _boutique_id(utilisateur)
     try:
         resultat = crud.remove_stock(db, id, quantite, boutique_id)
@@ -123,53 +130,52 @@ def movements(
     return crud.get_movements(db, boutique_id, skip=skip, limit=limit)
 
 
-@router.get("/movements/day", response_model=list[schemas.MovementResponse],
-            summary="Mouvements du jour")
+@router.get("/movements/day", response_model=list[schemas.MovementResponse])
 def movements_day(db: Session = Depends(get_db), utilisateur=Depends(exiger_vendeur)):
-    boutique_id  = _boutique_id(utilisateur)
+    boutique_id   = _boutique_id(utilisateur)
     debut_du_jour = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     return crud.get_movements_by_date(db, boutique_id, debut_du_jour)
 
 
-@router.get("/movements/week", response_model=list[schemas.MovementResponse],
-            summary="Mouvements de la semaine")
+@router.get("/movements/week", response_model=list[schemas.MovementResponse])
 def movements_week(db: Session = Depends(get_db), utilisateur=Depends(exiger_vendeur)):
     boutique_id = _boutique_id(utilisateur)
     return crud.get_movements_by_date(db, boutique_id, datetime.now(timezone.utc) - timedelta(days=7))
 
 
-@router.get("/movements/month", response_model=list[schemas.MovementResponse],
-            summary="Mouvements du mois")
+@router.get("/movements/month", response_model=list[schemas.MovementResponse])
 def movements_month(db: Session = Depends(get_db), utilisateur=Depends(exiger_vendeur)):
     boutique_id = _boutique_id(utilisateur)
     return crud.get_movements_by_date(db, boutique_id, datetime.now(timezone.utc) - timedelta(days=30))
 
 
 # ============================================================
-# ALERTES ET PROFITS — directeur uniquement
+# ALERTES ET PROFITS — permission requise
 # IMPORTANT : /profit/total AVANT /{id}/profit
 # ============================================================
 
 @router.get("/alerts/low-stock", response_model=list[schemas.ArticleResponse],
-            summary="Stock faible — directeur")
+            summary="Stock faible — permission voir_alertes")
 def low_stock(db: Session = Depends(get_db), directeur=Depends(exiger_directeur)):
+    verifier_permission(directeur, "voir_alertes")
     boutique_id = _boutique_id(directeur)
     return crud.get_articles_en_alerte_boutique(db, boutique_id)
 
 
-@router.get("/profit/total", summary="Bénéfice total de la boutique — directeur")
+@router.get("/profit/total", summary="Bénéfice total — permission voir_profits")
 def total_profit(db: Session = Depends(get_db), directeur=Depends(exiger_directeur)):
+    verifier_permission(directeur, "voir_profits")
     boutique_id = _boutique_id(directeur)
-    benefice    = crud.get_total_profit_boutique(db, boutique_id)
-    return {"benefice_total": benefice}
+    return {"benefice_total": crud.get_total_profit_boutique(db, boutique_id)}
 
 
-@router.get("/{id}/profit", summary="Bénéfice d'un article — directeur")
+@router.get("/{id}/profit", summary="Bénéfice d'un article — permission voir_profits")
 def article_profit(
-    id         : int,
-    db         : Session = Depends(get_db),
-    directeur  = Depends(exiger_directeur),
+    id        : int,
+    db        : Session = Depends(get_db),
+    directeur = Depends(exiger_directeur),
 ):
+    verifier_permission(directeur, "voir_profits")
     boutique_id = _boutique_id(directeur)
     resultat    = crud.get_article_profit(db, id, boutique_id)
     if not resultat:
