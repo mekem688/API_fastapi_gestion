@@ -2,9 +2,43 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 
-# =========================
-# ARTICLE
-# =========================
+# ============================================================
+# AUTHENTIFICATION
+# ============================================================
+
+class DemandeConnexion(BaseModel):
+    """Données envoyées lors d'une connexion."""
+    nom_utilisateur : str
+    mot_de_passe    : str
+
+
+class DemandeCreationUtilisateur(BaseModel):
+    """Données pour créer un nouvel utilisateur."""
+    nom_utilisateur : str = Field(min_length=3, max_length=50)
+    mot_de_passe    : str = Field(min_length=6)
+    role            : str = Field(pattern="^(vendeur|directeur)$")
+    #                              ^ doit être exactement "vendeur" ou "directeur"
+
+
+class ReponseToken(BaseModel):
+    """Réponse renvoyée après une connexion réussie."""
+    access_token : str        # le token JWT à utiliser dans les prochaines requêtes
+    type_token   : str = "bearer"
+
+
+class ReponseUtilisateur(BaseModel):
+    """Informations d'un utilisateur (sans le mot de passe)."""
+    id              : int
+    nom_utilisateur : str
+    role            : str
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================
+# ARTICLES
+# ============================================================
 
 class ArticleBase(BaseModel):
     name                : str
@@ -26,9 +60,9 @@ class ArticleResponse(ArticleBase):
         from_attributes = True
 
 
-# =========================
-# MOVEMENT
-# =========================
+# ============================================================
+# MOUVEMENTS DE STOCK
+# ============================================================
 
 class MovementResponse(BaseModel):
     id            : int
