@@ -7,40 +7,115 @@ from datetime import datetime
 # ============================================================
 
 class DemandeConnexion(BaseModel):
-    """Données envoyées lors d'une connexion."""
     nom_utilisateur : str
     mot_de_passe    : str
 
 
 class DemandeCreationUtilisateur(BaseModel):
-    """Données pour créer un nouvel utilisateur."""
+    """
+    Schéma de base pour créer un utilisateur.
+    Le rôle est libre ici — les routes elles-mêmes limitent
+    ce qui est autorisé (ex: creer-premier-compte → pdg seulement).
+    """
     nom_utilisateur : str = Field(min_length=3, max_length=50)
     mot_de_passe    : str = Field(min_length=6)
-    role            : str = Field(pattern="^(vendeur|directeur)$")
-    #                              ^ doit être exactement "vendeur" ou "directeur"
+    role            : str = Field(pattern="^(pdg|directeur|vendeur)$")
 
 
 class ReponseToken(BaseModel):
-    """Réponse renvoyée après une connexion réussie."""
-    access_token : str        # le token JWT à utiliser dans les prochaines requêtes
+    access_token : str
     type_token   : str = "bearer"
 
 
 class ReponseUtilisateur(BaseModel):
-    """Informations d'un utilisateur (sans le mot de passe)."""
     id              : int
     nom_utilisateur : str
     role            : str
+    boutique_id     : int | None = None
 
     class Config:
         from_attributes = True
 
 
 # ============================================================
+# BOUTIQUES
+# ============================================================
+
+class DemandeCréerBoutique(BaseModel):
+    nom     : str = Field(min_length=2, max_length=100)
+    ville   : str = Field(min_length=2, max_length=100)
+    adresse : str | None = None
+
+
+class ReponseBoutique(BaseModel):
+    id            : int
+    nom           : str
+    ville         : str
+    adresse       : str | None
+    est_active    : bool
+    date_creation : datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DemandeAjouterDirecteur(BaseModel):
+    """Données pour créer le directeur d'une boutique."""
+    nom_utilisateur : str = Field(min_length=3, max_length=50)
+    mot_de_passe    : str = Field(min_length=6)
+
+
+class DemandeAjouterVendeur(BaseModel):
+    """Données pour créer un vendeur dans une boutique."""
+    nom_utilisateur : str = Field(min_length=3, max_length=50)
+    mot_de_passe    : str = Field(min_length=6)
+
+
+# ============================================================
+# DASHBOARD PDG
+# ============================================================
+
+class StatsBoutique(BaseModel):
+    """Indicateurs clés d'une seule boutique."""
+    boutique        : ReponseBoutique
+    nb_articles     : int
+    nb_vendeurs     : int
+    benefice_total  : float
+    ventes_du_mois  : int
+
+
+class MouvementRecent(BaseModel):
+    """Ligne d'activité récente pour le fil d'actualité du PDG."""
+    boutique_nom   : str
+    article_nom    : str
+    type_mouvement : str     # "IN" ou "OUT"
+    quantite       : int
+    date           : datetime
+
+
+class DashboardPDG(BaseModel):
+    """Vue globale de toute l'entreprise."""
+    nb_boutiques              : int
+    nb_boutiques_actives      : int
+    benefice_total_entreprise : float
+    ventes_totales_du_mois    : int
+    articles_en_alerte        : int
+    classement_boutiques      : list[StatsBoutique]
+    activite_recente          : list[MouvementRecent]
+
+
+class PointEvolution(BaseModel):
+    """Un point sur la courbe d'évolution des ventes."""
+    date          : str    # format "YYYY-MM-DD"
+    nb_ventes     : int
+    benefice_jour : float
+
+
+# ============================================================
 # ARTICLES
 # ============================================================
 
-class ArticleBase(BaseModel):
+class ArticleCreate(BaseModel):
     name                : str
     description         : str | None = None
     price_achat         : float = Field(gt=0)
@@ -48,13 +123,10 @@ class ArticleBase(BaseModel):
     low_stock_threshold : int   = Field(default=5, ge=0)
 
 
-class ArticleCreate(ArticleBase):
-    pass
-
-
-class ArticleResponse(ArticleBase):
-    id       : int
-    quantity : int
+class ArticleResponse(ArticleCreate):
+    id          : int
+    boutique_id : int
+    quantity    : int
 
     class Config:
         from_attributes = True
@@ -66,6 +138,7 @@ class ArticleResponse(ArticleBase):
 
 class MovementResponse(BaseModel):
     id            : int
+    boutique_id   : int
     article_id    : int
     movement_type : str
     quantity      : int
