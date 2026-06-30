@@ -40,12 +40,44 @@ def journaliser(
     db.commit()
 
 
-def get_journal(db: Session, boutique_id: int | None = None, limite: int = 100):
-    """Retourne le journal — filtré par boutique si boutique_id fourni, sinon tout."""
+def _paginer(requete, page: int, taille: int) -> tuple[int, list]:
+    """
+    Applique la pagination sur une requête SQLAlchemy.
+
+    Args:
+        requete : requête SQLAlchemy (pas encore exécutée)
+        page    : numéro de page, commence à 1
+        taille  : nombre d'éléments par page
+
+    Returns:
+        (total, items) — total = nombre total sans pagination
+    """
+    total = requete.count()
+    items = requete.offset((page - 1) * taille).limit(taille).all()
+    return total, items
+
+
+def get_journal(
+    db          : Session,
+    boutique_id : int | None = None,
+    page        : int = 1,
+    taille      : int = 50,
+) -> tuple[int, list]:
+    """
+    Retourne le journal paginé.
+
+    Args:
+        boutique_id : filtre par boutique (None = toutes les boutiques, pour le PDG)
+        page        : numéro de page (1 = première page)
+        taille      : nombre d'entrées par page
+
+    Returns:
+        (total, entrées_de_la_page)
+    """
     requete = db.query(JournalActivite).order_by(JournalActivite.date_heure.desc())
     if boutique_id is not None:
         requete = requete.filter(JournalActivite.boutique_id == boutique_id)
-    return requete.limit(limite).all()
+    return _paginer(requete, page, taille)
 
 
 # ============================================================
@@ -367,11 +399,29 @@ def creer_vente_credit(db: Session, directeur, data) -> VenteCredit:
     return vente
 
 
-def get_ventes_credit(db: Session, boutique_id: int, statut: str | None = None):
+def get_ventes_credit(
+    db          : Session,
+    boutique_id : int,
+    statut      : str | None = None,
+    page        : int = 1,
+    taille      : int = 20,
+) -> tuple[int, list]:
+    """
+    Retourne les ventes à crédit paginées.
+
+    Args:
+        statut : filtre optionnel (en_cours | partiellement_paye | en_retard | solde)
+        page   : numéro de page (1 = première page)
+        taille : nombre d'éléments par page
+
+    Returns:
+        (total, ventes_de_la_page)
+    """
     requete = db.query(VenteCredit).filter(VenteCredit.boutique_id == boutique_id)
     if statut:
         requete = requete.filter(VenteCredit.statut == statut)
-    return requete.order_by(VenteCredit.date_echeance.asc()).all()
+    requete = requete.order_by(VenteCredit.date_echeance.asc())
+    return _paginer(requete, page, taille)
 
 
 def get_vente_credit(db: Session, vente_id: int, boutique_id: int):
@@ -433,11 +483,29 @@ def creer_achat_credit(db: Session, directeur, data) -> AchatCredit:
     return achat
 
 
-def get_achats_credit(db: Session, boutique_id: int, statut: str | None = None):
+def get_achats_credit(
+    db          : Session,
+    boutique_id : int,
+    statut      : str | None = None,
+    page        : int = 1,
+    taille      : int = 20,
+) -> tuple[int, list]:
+    """
+    Retourne les achats à crédit paginés.
+
+    Args:
+        statut : filtre optionnel (en_cours | partiellement_paye | en_retard | solde)
+        page   : numéro de page (1 = première page)
+        taille : nombre d'éléments par page
+
+    Returns:
+        (total, achats_de_la_page)
+    """
     requete = db.query(AchatCredit).filter(AchatCredit.boutique_id == boutique_id)
     if statut:
         requete = requete.filter(AchatCredit.statut == statut)
-    return requete.order_by(AchatCredit.date_echeance.asc()).all()
+    requete = requete.order_by(AchatCredit.date_echeance.asc())
+    return _paginer(requete, page, taille)
 
 
 def get_achat_credit(db: Session, achat_id: int, boutique_id: int):
