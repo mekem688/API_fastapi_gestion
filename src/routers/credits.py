@@ -25,7 +25,7 @@ RÉSUMÉ :
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from ..dependencies import get_db, exiger_directeur
+from ..dependencies import get_db, exiger_directeur, exiger_vendeur
 from ..models import PaiementRecu, PaiementEffectue
 from .. import crud, schemas
 
@@ -307,3 +307,83 @@ def journal_boutique(
     """
     boutique_id = _boutique_id(directeur)
     return crud.get_journal(db, boutique_id=boutique_id, limite=limite)
+
+
+# ================================================================
+# CONFIGURATION DE LA FACTURE — en-tête personnalisable par le DG
+# ================================================================
+
+@router.get(
+    "/config-facture",
+    response_model=schemas.ReponseConfigFacture,
+    summary="Lire la configuration de facture de sa boutique",
+)
+def lire_config_facture(
+    db        : Session = Depends(get_db),
+    directeur = Depends(exiger_directeur),
+):
+    boutique_id = _boutique_id(directeur)
+    config = crud.get_config_facture(db, boutique_id)
+    if not config:
+        raise HTTPException(
+            status_code=404,
+            detail="Aucune configuration de facture définie pour cette boutique. Utilisez PUT pour la créer.",
+        )
+    return config
+
+
+@router.put(
+    "/config-facture",
+    response_model=schemas.ReponseConfigFacture,
+    summary="Créer ou modifier l'en-tête de facture de sa boutique",
+)
+def modifier_config_facture(
+    data      : schemas.DemandeConfigFacture,
+    db        : Session = Depends(get_db),
+    directeur = Depends(exiger_directeur),
+):
+    """
+    Le DG personnalise l'en-tête imprimé sur chaque facture de sa boutique :
+    nom, slogan, téléphone, adresse, email, pied de page.
+    """
+    boutique_id = _boutique_id(directeur)
+    boutique    = crud.get_boutique(db, boutique_id)
+    config      = crud.enregistrer_config_facture(db, boutique_id, data)
+
+    crud.journaliser(db, directeur, boutique.nom if boutique else None, "config_facture_modifiee", {
+        "nom_boutique": data.nom_boutique,
+    })
+
+    return config
+
+
+@router.get(
+    "/config-facture/impression",
+    response_model=schemas.ReponseConfigFacture,
+    summary="Lire l'en-tête de facture pour l'impression — accessible au vendeur",
+)
+def config_facture_pour_impression(
+    db          : Session = Depends(get_db),
+    utilisateur = Depends(exiger_vendeur),
+):
+    """
+    Route utilisée par l'application de bureau (vendeur) au moment d'imprimer
+    une facture. Si aucune configuration n'a été définie par le DG, retourne
+    des valeurs par défaut plutôt qu'une erreur (pour ne jamais bloquer la vente).
+    """
+    boutique_id = _boutique_id(utilisateur)
+    config      = crud.get_config_facture(db, boutique_id)
+    if config:
+        return config
+
+    boutique = crud.get_boutique(db, boutique_id)
+    return schemas.ReponseConfigFacture(
+        id           = 0,
+        boutique_id  = boutique_id,
+        nom_boutique = boutique.nom if boutique else "Boutique",
+        slogan       = None,
+        telephone    = None,
+        adresse      = boutique.adresse if boutique else None,
+        email        = None,
+        pied_de_page = "Merci pour votre confiance !",
+    )

@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 from .models import (
     Article, StockMovement, Utilisateur, Boutique,
     VenteCredit, PaiementRecu, AchatCredit, PaiementEffectue,
-    JournalActivite,
+    JournalActivite, ConfigFacture,
 )
 from .auth import hacher_mot_de_passe, verifier_mot_de_passe
 from .permissions import TOUTES_LES_PERMISSIONS
@@ -209,6 +209,36 @@ def archiver_boutique(db: Session, boutique_id: int):
         db.commit()
         db.refresh(boutique)
     return boutique
+
+
+# ============================================================
+# CONFIGURATION DE LA FACTURE (en-tête personnalisable)
+# ============================================================
+
+def get_config_facture(db: Session, boutique_id: int):
+    return db.query(ConfigFacture).filter(ConfigFacture.boutique_id == boutique_id).first()
+
+
+def enregistrer_config_facture(db: Session, boutique_id: int, data) -> ConfigFacture:
+    """
+    Crée ou met à jour la configuration de facture d'une boutique.
+    Une seule ligne par boutique — on met à jour si elle existe déjà.
+    """
+    config = get_config_facture(db, boutique_id)
+    if config is None:
+        config = ConfigFacture(boutique_id=boutique_id)
+        db.add(config)
+
+    config.nom_boutique = data.nom_boutique
+    config.slogan       = data.slogan
+    config.telephone    = data.telephone
+    config.adresse      = data.adresse
+    config.email        = data.email
+    config.pied_de_page = data.pied_de_page
+
+    db.commit()
+    db.refresh(config)
+    return config
 
 
 # ============================================================

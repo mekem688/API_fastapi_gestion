@@ -258,6 +258,33 @@ class ResumeCredits(BaseModel):
 
 
 # ============================================================
+# CONFIGURATION DE LA FACTURE (en-tête personnalisable par le DG)
+# ============================================================
+
+class DemandeConfigFacture(BaseModel):
+    nom_boutique : str = Field(min_length=2, max_length=100)
+    slogan       : str | None = Field(default=None, max_length=150)
+    telephone    : str | None = Field(default=None, max_length=20)
+    adresse      : str | None = Field(default=None, max_length=200)
+    email        : str | None = Field(default=None, max_length=100)
+    pied_de_page : str | None = Field(default="Merci pour votre confiance !", max_length=300)
+
+
+class ReponseConfigFacture(BaseModel):
+    id           : int
+    boutique_id  : int
+    nom_boutique : str
+    slogan       : str | None
+    telephone    : str | None
+    adresse      : str | None
+    email        : str | None
+    pied_de_page : str | None
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================
 # JOURNAL D'ACTIVITÉ
 # ============================================================
 

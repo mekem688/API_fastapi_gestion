@@ -150,6 +150,22 @@ class PaiementEffectue(Base):
 # JOURNAL D'ACTIVITÉ — traçabilité de toutes les actions
 # ================================================================
 
+class ConfigFacture(Base):
+    """
+    En-tête de facture personnalisable par le directeur de chaque boutique.
+    Une seule configuration par boutique (relation 1-1 avec Boutique).
+    """
+    __tablename__ = "config_factures"
+    id            = Column(Integer, primary_key=True, index=True)
+    boutique_id   = Column(Integer, ForeignKey("boutiques.id"), unique=True, nullable=False)
+    nom_boutique  = Column(String(100), nullable=False)
+    slogan        = Column(String(150), nullable=True)
+    telephone     = Column(String(20),  nullable=True)
+    adresse       = Column(String(200), nullable=True)
+    email         = Column(String(100), nullable=True)
+    pied_de_page  = Column(String(300), default="Merci pour votre confiance !")
+
+
 class JournalActivite(Base):
     """
     Enregistre automatiquement chaque action significative.
